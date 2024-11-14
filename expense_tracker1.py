@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -13,14 +13,47 @@ current_year = datetime.now().year
 
 # Function to add a new expense
 def add_expense(year, month, category, amount, description):
+    # Ensure the 'Year' is an integer and 'Month' is a string
+    year = int(year)
+    month = str(month).zfill(2)  # Ensure month is always two digits, e.g., '01' for January
+
     new_expense = pd.DataFrame([[year, month, category, amount, description]], columns=['Year', 'Month', 'Category', 'Amount', 'Description'])
+    
+    # Append the new expense to the session state expenses DataFrame
     st.session_state.expenses = pd.concat([st.session_state.expenses, new_expense], ignore_index=True)
 
-# Function to load expenses from a CSV file
-def load_expenses():
-    uploaded_file = st.file_uploader("Choose a file", type=['csv'])
+# Function to load expenses from a CSV or Excel file
+def load_expenses(uploaded_file):
     if uploaded_file is not None:
-        st.session_state.expenses = pd.read_csv(uploaded_file)
+        if uploaded_file.name.endswith('.csv'):
+            # Read the CSV file
+            st.session_state.expenses = pd.read_csv(uploaded_file)
+
+            # Clean the 'Year' column - strip any unwanted characters and convert to integer
+            st.session_state.expenses['Year'] = st.session_state.expenses['Year'].apply(lambda x: str(x).replace(',', '').strip())
+            st.session_state.expenses['Year'] = pd.to_numeric(st.session_state.expenses['Year'], errors='coerce')
+
+        elif uploaded_file.name.endswith(('.xls', '.xlsx')):
+            st.session_state.expenses = pd.read_excel(uploaded_file)
+
+        # Clean column names and ensure they match expected names
+        st.session_state.expenses.columns = [col.strip().title() for col in st.session_state.expenses.columns]
+
+        # Ensure Year column is in integer format
+        st.session_state.expenses['Year'] = st.session_state.expenses['Year'].astype(str).str.strip()
+        st.session_state.expenses['Year'] = pd.to_numeric(st.session_state.expenses['Year'], errors='coerce')
+
+        # Ensure Month column is in string format (in case it is stored as a number)
+        st.session_state.expenses['Month'] = st.session_state.expenses['Month'].astype(str).str.strip()
+
+        # Check if required columns exist; if not, raise an error
+        required_columns = ['Year', 'Month', 'Category', 'Amount', 'Description']
+        for col in required_columns:
+            if col not in st.session_state.expenses.columns:
+                st.error(f"Missing required column: {col}")
+                return
+        
+        # Limit to only the required columns
         st.session_state.expenses = st.session_state.expenses[['Year', 'Month', 'Category', 'Amount', 'Description']]
 
 # Function to save expenses to a CSV file
@@ -31,21 +64,42 @@ def save_expenses():
 # Function to visualize expenses by category
 def visualize_expenses(year, month):
     if not st.session_state.expenses.empty:
-        filtered_expenses = st.session_state.expenses[(st.session_state.expenses['Year'] == year) & (st.session_state.expenses['Month'] == month)]
+        # Ensure the year and month are integers or properly formatted
+        year = int(year)
+        month = str(month).zfill(2)  # Ensure the month is two digits (01, 02, etc.)
+
+        # Filter the expenses by the selected year and month
+        filtered_expenses = st.session_state.expenses[
+            (st.session_state.expenses['Year'] == year) & 
+            (st.session_state.expenses['Month'] == month)
+        ]
+        
+        # Check if there are any filtered expenses for the selected year and month
         if not filtered_expenses.empty:
-            fig, ax = plt.subplots()
-            sns.barplot(data=filtered_expenses, x='Category', y='Amount', ax=ax, estimator=sum, palette='viridis')
+            # Group the filtered data by category and sum the amount for each category
+            expense_summary = filtered_expenses.groupby('Category')['Amount'].sum().reset_index()
+
+            # Plot the data
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.barplot(data=expense_summary, x='Category', y='Amount', ax=ax, palette='viridis')
             plt.xticks(rotation=45)
             plt.title(f'Total Expenses by Category for {month} {year}')
             st.pyplot(fig)
         else:
-            st.warning(f"No Expenses for {month} {year} to Visualize")
+            st.warning(f"No expenses found for {month} {year}.")
     else:
-        st.warning("No Expenses to Visualize")
+        st.warning("No expenses available to visualize.")
 
 # Function to calculate and display the total expenses for the selected month and year
 def display_monthly_summary(year, month):
-    month_expenses = st.session_state.expenses[(st.session_state.expenses['Year'] == year) & (st.session_state.expenses['Month'] == month)]
+    # Ensure the year and month are integers or properly formatted
+    year = int(year)
+    month = str(month).zfill(2)  # Ensure the month is two digits (01, 02, etc.)
+
+    month_expenses = st.session_state.expenses[
+        (st.session_state.expenses['Year'] == year) & (st.session_state.expenses['Month'] == month)
+    ]
+    
     total_amount_spent = month_expenses['Amount'].sum()
     return total_amount_spent
 
@@ -76,10 +130,13 @@ with st.sidebar:
         st.success("Expense Added!")
 
     st.header('File Operations')
+    uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx', 'xls'])
+    if uploaded_file is not None:
+        load_expenses(uploaded_file)
+        st.success("Expenses Loaded Successfully")
+
     if st.button('Save Expenses'):
         save_expenses()
-    if st.button('Load Expenses'):
-        load_expenses()
 
 # Display the expenses DataFrame
 st.header('Expenses')
